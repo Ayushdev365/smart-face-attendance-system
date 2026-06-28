@@ -1,0 +1,730 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>AI Smart Attendance System — Ayush Chouksey</title>
+<!-- face-api.js — full ML face recognition in the browser, no server needed -->
+<script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<style>
+:root{
+  --bg:#07090f;--surface:#0e1117;--surface2:#161b26;
+  --border:rgba(255,255,255,.08);--accent:#4f8cff;--accent2:#a78bfa;
+  --gold:#f9a825;--green:#22d3a5;--red:#ff5c6c;--text:#e8eaf0;--muted:#6b7280;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{background:var(--bg);color:var(--text);font-family:'DM Mono',monospace;display:flex;flex-direction:column}
+body::after{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(255,255,255,.012) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.012) 1px,transparent 1px);background-size:60px 60px;pointer-events:none;z-index:0}
+
+/* ── TOP BAR ── */
+.topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:0 28px;display:flex;align-items:center;justify-content:space-between;height:52px;flex-shrink:0;position:relative;z-index:10}
+.logo{font-family:'Syne',sans-serif;font-weight:800;font-size:15px;letter-spacing:.04em}
+.logo span{color:var(--accent)}
+.topbar-right{display:flex;align-items:center;gap:20px;font-size:11px;color:var(--muted)}
+.live-dot{display:flex;align-items:center;gap:6px;font-size:11px}
+.live-dot .dot{width:7px;height:7px;border-radius:50%;background:var(--muted)}
+.live-dot.ready .dot{background:var(--green);animation:blink 1.4s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
+
+/* ── LOADING SCREEN ── */
+#loadScreen{position:fixed;inset:0;background:var(--bg);z-index:999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px}
+.load-logo{font-family:'Syne',sans-serif;font-weight:800;font-size:28px;color:var(--text)}
+.load-logo span{color:var(--accent)}
+.load-bar-wrap{width:320px;height:4px;background:var(--surface2);border-radius:2px;overflow:hidden}
+.load-bar{height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:2px;width:0;transition:width .4s ease}
+.load-msg{font-size:12px;color:var(--muted);letter-spacing:.06em}
+.load-steps{font-size:11px;color:var(--muted);text-align:center;line-height:1.8}
+
+/* ── MAIN LAYOUT ── */
+.app{flex:1;display:grid;grid-template-columns:1fr 340px;overflow:hidden;position:relative;z-index:1}
+
+/* ── LEFT ── */
+.left-panel{display:flex;flex-direction:column;border-right:1px solid var(--border);overflow:hidden}
+.tabs{display:flex;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0}
+.tab{padding:13px 20px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;transition:all .2s;user-select:none;white-space:nowrap}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.tab:hover:not(.active){color:var(--text)}
+
+.tab-content{flex:1;overflow:hidden;display:flex;flex-direction:column}
+.tab-pane{display:none;flex-direction:column;height:100%}
+.tab-pane.active{display:flex}
+
+/* camera area */
+.cam-wrap{flex:1;background:#000;position:relative;overflow:hidden;min-height:0}
+#video{width:100%;height:100%;object-fit:cover;display:block;transform:scaleX(-1)}
+#overlay{position:absolute;inset:0;pointer-events:none;transform:scaleX(-1)}
+.cam-chip{position:absolute;padding:5px 11px;border-radius:5px;font-size:10px;letter-spacing:.07em;backdrop-filter:blur(8px);background:rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.08)}
+#camStatus{top:12px;left:12px;color:var(--muted)}
+#camStatus.live{color:var(--green);border-color:rgba(34,211,165,.3)}
+#fpsEl{top:12px;right:12px;color:var(--muted)}
+#faceCountChip{bottom:12px;left:12px}
+.fc-lbl{font-size:9px;color:var(--muted);margin-bottom:2px;letter-spacing:.1em}
+.fc-val{font-size:18px;font-family:'Syne',sans-serif;font-weight:800;color:var(--text)}
+
+.cam-controls{padding:12px 16px;display:flex;gap:8px;background:var(--surface);border-top:1px solid var(--border);flex-shrink:0;flex-wrap:wrap}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:7px;font-family:'DM Mono',monospace;font-size:11px;letter-spacing:.04em;cursor:pointer;transition:all .18s;border:none;user-select:none;white-space:nowrap}
+.btn:disabled{opacity:.35;cursor:not-allowed;pointer-events:none}
+.btn-green{background:rgba(34,211,165,.13);color:var(--green);border:1px solid rgba(34,211,165,.28)}
+.btn-green:hover:not(:disabled){background:rgba(34,211,165,.22)}
+.btn-green.active{background:rgba(34,211,165,.25);box-shadow:0 0 12px rgba(34,211,165,.2)}
+.btn-red{background:rgba(255,92,108,.1);color:var(--red);border:1px solid rgba(255,92,108,.28)}
+.btn-red:hover:not(:disabled){background:rgba(255,92,108,.18)}
+.btn-blue{background:rgba(79,140,255,.12);color:var(--accent);border:1px solid rgba(79,140,255,.28)}
+.btn-blue:hover:not(:disabled){background:rgba(79,140,255,.2)}
+.btn-ghost{background:transparent;color:var(--muted);border:1px solid var(--border)}
+.btn-ghost:hover:not(:disabled){color:var(--text);border-color:rgba(255,255,255,.18)}
+
+/* register tab */
+.reg-area{flex:1;padding:24px;overflow-y:auto;display:flex;flex-direction:column;gap:18px}
+.reg-area::-webkit-scrollbar{width:4px}
+.reg-area::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.field-label{font-size:10px;letter-spacing:.12em;color:var(--muted);text-transform:uppercase;margin-bottom:7px}
+.field-input{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;color:var(--text);font-family:'DM Mono',monospace;font-size:13px;outline:none;transition:border-color .2s}
+.field-input:focus{border-color:var(--accent2)}
+.snap-box{border:2px dashed var(--border);border-radius:12px;overflow:hidden;aspect-ratio:4/3;background:#000;position:relative;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:border-color .2s}
+.snap-box:hover{border-color:var(--accent2)}
+#regVideo{width:100%;height:100%;object-fit:cover;display:none;transform:scaleX(-1)}
+#regCanvas{display:none}
+#snapImg{width:100%;height:100%;object-fit:cover;display:none}
+.snap-ph{text-align:center;color:var(--muted);pointer-events:none;padding:20px}
+.snap-ph .icon{font-size:36px;margin-bottom:10px}
+.snap-ph p{font-size:12px;line-height:1.6}
+.reg-btns{display:flex;gap:8px;flex-wrap:wrap}
+#regMsg{min-height:20px;font-size:12px;text-align:center;padding:4px}
+
+/* people tab */
+.people-header{padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.people-header span{font-family:'Syne',sans-serif;font-size:13px;font-weight:700}
+#peopleCount{font-size:11px;color:var(--muted)}
+#peopleList{flex:1;overflow-y:auto;padding:12px}
+#peopleList::-webkit-scrollbar{width:4px}
+#peopleList::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.person-card{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;margin-bottom:6px;background:var(--surface2);border:1px solid var(--border);transition:border-color .18s}
+.person-card:hover{border-color:rgba(79,140,255,.25)}
+.p-avatar{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;font-family:'Syne',sans-serif;flex-shrink:0}
+.p-info{flex:1;min-width:0}
+.p-name{font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.p-sub{font-size:10px;color:var(--muted);margin-top:2px}
+.p-del{background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;padding:4px;border-radius:4px;transition:color .15s}
+.p-del:hover{color:var(--red)}
+
+/* ── RIGHT PANEL ── */
+.right-panel{display:flex;flex-direction:column;background:var(--surface);overflow:hidden}
+.stats-row{display:grid;grid-template-columns:repeat(3,1fr);border-bottom:1px solid var(--border);flex-shrink:0}
+.stat{padding:14px 8px;text-align:center;border-right:1px solid var(--border)}
+.stat:last-child{border-right:none}
+.stat-n{font-family:'Syne',sans-serif;font-size:28px;font-weight:800;color:var(--accent);line-height:1}
+.stat-n.green{color:var(--green)}
+.stat-l{font-size:9px;letter-spacing:.1em;color:var(--muted);text-transform:uppercase;margin-top:4px}
+.log-hdr{padding:13px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.log-hdr-title{font-family:'Syne',sans-serif;font-size:13px;font-weight:700}
+.log-date{font-size:10px;color:var(--muted)}
+#logList{flex:1;overflow-y:auto;padding:10px}
+#logList::-webkit-scrollbar{width:4px}
+#logList::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.log-empty{text-align:center;color:var(--muted);font-size:12px;padding:32px 12px;line-height:1.7}
+.log-entry{display:flex;align-items:center;gap:9px;padding:9px 11px;border-radius:8px;margin-bottom:5px;background:var(--surface2);border:1px solid var(--border);animation:slideIn .28s ease}
+@keyframes slideIn{from{opacity:0;transform:translateX(10px)}to{opacity:1;transform:translateX(0)}}
+.le-av{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;font-family:'Syne',sans-serif;flex-shrink:0}
+.le-info{flex:1;min-width:0}
+.le-name{font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.le-time{font-size:10px;color:var(--muted);margin-top:1px}
+.le-badge{padding:3px 8px;border-radius:100px;font-size:9px;letter-spacing:.04em;flex-shrink:0}
+.badge-present{background:rgba(34,211,165,.1);color:var(--green);border:1px solid rgba(34,211,165,.22)}
+.badge-unknown{background:rgba(255,92,108,.08);color:var(--red);border:1px solid rgba(255,92,108,.2)}
+.dl-bar{padding:11px 14px;border-top:1px solid var(--border);display:flex;gap:8px;flex-shrink:0}
+
+/* toast */
+.toast{position:fixed;bottom:22px;right:22px;padding:13px 18px;border-radius:10px;font-size:12px;max-width:280px;z-index:9999;opacity:0;transform:translateY(8px);transition:all .28s;pointer-events:none;background:var(--surface2);border:1px solid var(--border);line-height:1.5}
+.toast.show{opacity:1;transform:translateY(0)}
+.toast.s{border-color:rgba(34,211,165,.4);color:var(--green)}
+.toast.e{border-color:rgba(255,92,108,.4);color:var(--red)}
+.toast.i{border-color:rgba(79,140,255,.4);color:var(--accent)}
+
+/* confidence bar inside box */
+.conf-bar-wrap{position:absolute;bottom:0;left:0;right:0;height:3px;background:rgba(0,0,0,.4)}
+.conf-bar{height:100%;background:var(--green);transition:width .3s}
+
+@media(max-width:860px){
+  .app{grid-template-columns:1fr;grid-template-rows:1fr 260px}
+  .left-panel{border-right:none;border-bottom:1px solid var(--border)}
+}
+</style>
+</head>
+<body>
+
+<!-- LOADING SCREEN -->
+<div id="loadScreen">
+  <div class="load-logo">AI <span>Smart</span> Attendance</div>
+  <div class="load-steps" id="loadStep">Initialising…</div>
+  <div class="load-bar-wrap"><div class="load-bar" id="loadBar"></div></div>
+  <div class="load-msg" id="loadMsg">Please wait, loading AI models…</div>
+</div>
+
+<!-- TOP BAR -->
+<div class="topbar">
+  <div class="logo">AI <span>Smart</span> Attendance</div>
+  <div class="topbar-right">
+    <div class="live-dot" id="liveDot"><div class="dot"></div><span id="liveLabel">Loading models…</span></div>
+    <span id="topDate"></span>
+    <span style="color:var(--accent2)">Ayush Chouksey</span>
+  </div>
+</div>
+
+<div class="app">
+
+  <!-- ══ LEFT PANEL ══ -->
+  <div class="left-panel">
+    <div class="tabs">
+      <div class="tab active" onclick="switchTab('scan')">📷 Scan &amp; Mark</div>
+      <div class="tab" onclick="switchTab('register')">➕ Register Face</div>
+      <div class="tab" onclick="switchTab('people')">👥 Registered</div>
+    </div>
+
+    <div class="tab-content">
+
+      <!-- SCAN TAB -->
+      <div class="tab-pane active" id="tab-scan">
+        <div class="cam-wrap">
+          <video id="video" autoplay muted playsinline></video>
+          <canvas id="overlay"></canvas>
+          <div class="cam-chip" id="camStatus">CAMERA OFF</div>
+          <div class="cam-chip" id="fpsEl">FPS: —</div>
+          <div class="cam-chip" id="faceCountChip">
+            <div class="fc-lbl">FACES DETECTED</div>
+            <div class="fc-val" id="fcVal">0</div>
+          </div>
+        </div>
+        <div class="cam-controls">
+          <button class="btn btn-green" id="startBtn" onclick="startCam()">▶ Start Camera</button>
+          <button class="btn btn-red"   id="stopBtn"  onclick="stopCam()" disabled>■ Stop</button>
+          <button class="btn btn-blue"  id="scanBtn"  onclick="toggleScan()" disabled>⊙ Auto-Scan: OFF</button>
+          <button class="btn btn-ghost" onclick="clearToday()">🗑 Clear Today</button>
+        </div>
+      </div>
+
+      <!-- REGISTER TAB -->
+      <div class="tab-pane" id="tab-register">
+        <div class="reg-area">
+          <div>
+            <div class="field-label">Full Name *</div>
+            <input class="field-input" id="regName" placeholder="e.g. Ayush Chouksey" autocomplete="off"/>
+          </div>
+          <div>
+            <div class="field-label">Capture Face Photo</div>
+            <div class="snap-box" id="snapBox">
+              <video id="regVideo" autoplay muted playsinline></video>
+              <canvas id="regCanvas"></canvas>
+              <img id="snapImg" alt=""/>
+              <div class="snap-ph" id="snapPh">
+                <div class="icon">📸</div>
+                <p>Click <strong>Open Camera</strong> below<br/>then <strong>Capture</strong> your face</p>
+              </div>
+            </div>
+          </div>
+          <div class="reg-btns">
+            <button class="btn btn-blue"  id="regCamBtn"  onclick="openRegCam()">📷 Open Camera</button>
+            <button class="btn btn-green" id="captureBtn" onclick="doCapture()" disabled>📸 Capture</button>
+            <button class="btn btn-ghost"               onclick="doRetake()">↺ Retake</button>
+          </div>
+          <button class="btn btn-green" onclick="doRegister()" style="width:100%;justify-content:center;padding:12px;font-size:12px">
+            ✓ Register This Person
+          </button>
+          <div id="regMsg"></div>
+        </div>
+      </div>
+
+      <!-- PEOPLE TAB -->
+      <div class="tab-pane" id="tab-people">
+        <div class="people-header">
+          <span>Registered People</span>
+          <span id="peopleCount">0 people</span>
+        </div>
+        <div id="peopleList">
+          <div class="log-empty">No one registered yet.<br/>Go to Register Face tab.</div>
+        </div>
+      </div>
+
+    </div><!-- /tab-content -->
+  </div><!-- /left-panel -->
+
+  <!-- ══ RIGHT PANEL ══ -->
+  <div class="right-panel">
+    <div class="stats-row">
+      <div class="stat"><div class="stat-n" id="sPresent">0</div><div class="stat-l">Present</div></div>
+      <div class="stat"><div class="stat-n" id="sReg">0</div><div class="stat-l">Registered</div></div>
+      <div class="stat"><div class="stat-n green" id="sRate">0%</div><div class="stat-l">Rate</div></div>
+    </div>
+    <div class="log-hdr">
+      <span class="log-hdr-title">Attendance Log</span>
+      <span class="log-date" id="logDate"></span>
+    </div>
+    <div id="logList"><div class="log-empty">No attendance recorded yet.<br/>Start camera → Auto-Scan to begin.</div></div>
+    <div class="dl-bar">
+      <button class="btn btn-blue" onclick="downloadCSV()" style="flex:1;justify-content:center">⬇ Download CSV</button>
+      <button class="btn btn-ghost" onclick="renderLog()">↺ Refresh</button>
+    </div>
+  </div>
+
+</div><!-- /app -->
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ══════════════════════════════════════════════════════════════
+//  GLOBALS
+// ══════════════════════════════════════════════════════════════
+let modelsReady  = false;
+let camStream    = null;
+let regStream    = null;
+let scanning     = false;
+let scanTimer    = null;
+let snapshotB64  = null;
+
+// persistent store — survives tab switches, lost on page reload (by design for demo)
+let registeredPeople = JSON.parse(localStorage.getItem('atten_people') || '[]');
+// Each item: { name, descriptor: Float32Array, color, addedAt }
+
+let attendanceLog = JSON.parse(localStorage.getItem('atten_log_'+today()) || '[]');
+// Each item: { name, time, confidence }
+
+const COLORS = ['#4f8cff','#a78bfa','#22d3a5','#f9a825','#ff5c6c','#38bdf8','#fb923c','#a3e635'];
+
+// ══════════════════════════════════════════════════════════════
+//  HELPERS
+// ══════════════════════════════════════════════════════════════
+function today(){ return new Date().toISOString().slice(0,10); }
+function nowTime(){ return new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
+function toast(msg, type='i'){
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.className=`toast ${type} show`;
+  clearTimeout(t._tid);
+  t._tid=setTimeout(()=>t.className='toast',3200);
+}
+function save(){
+  localStorage.setItem('atten_people', JSON.stringify(
+    registeredPeople.map(p=>({...p, descriptor: Array.from(p.descriptor)}))
+  ));
+}
+function saveLog(){
+  localStorage.setItem('atten_log_'+today(), JSON.stringify(attendanceLog));
+}
+function euclidean(a,b){
+  let s=0; for(let i=0;i<a.length;i++) s+=(a[i]-b[i])**2; return Math.sqrt(s);
+}
+
+// ══════════════════════════════════════════════════════════════
+//  LOAD MODELS
+// ══════════════════════════════════════════════════════════════
+const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.13/model/';
+
+async function setLoad(msg, pct){
+  document.getElementById('loadStep').textContent = msg;
+  document.getElementById('loadBar').style.width  = pct+'%';
+}
+
+window.addEventListener('load', async ()=>{
+  document.getElementById('topDate').textContent =
+    new Date().toLocaleDateString('en-IN',{weekday:'short',year:'numeric',month:'short',day:'numeric'});
+  document.getElementById('logDate').textContent =
+    new Date().toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'});
+
+  // restore descriptors as Float32Array
+  registeredPeople = registeredPeople.map(p=>({
+    ...p, descriptor: new Float32Array(p.descriptor||[])
+  }));
+
+  try {
+    await setLoad('Loading face detection model…', 20);
+    await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+
+    await setLoad('Loading facial landmark model…', 50);
+    await faceapi.nets.faceLandmark68TinyNet.loadFromUri(MODEL_URL);
+
+    await setLoad('Loading face recognition model…', 80);
+    await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
+
+    await setLoad('All models loaded ✓', 100);
+    modelsReady = true;
+
+    document.getElementById('liveLabel').textContent = 'AI Ready';
+    document.getElementById('liveDot').classList.add('ready');
+
+    setTimeout(()=>{
+      document.getElementById('loadScreen').style.opacity='0';
+      setTimeout(()=>document.getElementById('loadScreen').style.display='none',400);
+    }, 500);
+
+    renderLog();
+    renderPeople();
+    updateStats();
+
+  } catch(err){
+    document.getElementById('loadStep').textContent = '⚠ Model load failed';
+    document.getElementById('loadMsg').textContent  = 'Check internet connection and refresh.';
+    document.getElementById('loadMsg').style.color  = 'var(--red)';
+    console.error(err);
+  }
+});
+
+// ══════════════════════════════════════════════════════════════
+//  TABS
+// ══════════════════════════════════════════════════════════════
+function switchTab(name){
+  ['scan','register','people'].forEach((n,i)=>{
+    document.querySelectorAll('.tab')[i].classList.toggle('active',n===name);
+    document.getElementById('tab-'+n).classList.toggle('active',n===name);
+  });
+  if(name==='people') renderPeople();
+}
+
+// ══════════════════════════════════════════════════════════════
+//  CAMERA — SCAN TAB
+// ══════════════════════════════════════════════════════════════
+async function startCam(){
+  if(!modelsReady){ toast('AI models still loading, please wait…','i'); return; }
+  try{
+    camStream = await navigator.mediaDevices.getUserMedia({
+      video:{width:{ideal:1280},height:{ideal:720},facingMode:'user'}, audio:false
+    });
+    const v=document.getElementById('video');
+    v.srcObject=camStream;
+    await new Promise(r=>v.onloadedmetadata=r);
+
+    const st=document.getElementById('camStatus');
+    st.textContent='● LIVE'; st.classList.add('live');
+    document.getElementById('startBtn').disabled=true;
+    document.getElementById('stopBtn').disabled=false;
+    document.getElementById('scanBtn').disabled=false;
+    toast('Camera started!','s');
+  }catch(e){
+    toast('Camera access denied. Allow camera in browser settings.','e');
+  }
+}
+
+function stopCam(){
+  if(scanning) toggleScan();
+  if(camStream){ camStream.getTracks().forEach(t=>t.stop()); camStream=null; }
+  document.getElementById('video').srcObject=null;
+  const st=document.getElementById('camStatus');
+  st.textContent='CAMERA OFF'; st.classList.remove('live');
+  document.getElementById('startBtn').disabled=false;
+  document.getElementById('stopBtn').disabled=true;
+  document.getElementById('scanBtn').disabled=true;
+  clearCanvas();
+  document.getElementById('fcVal').textContent='0';
+}
+
+function toggleScan(){
+  if(!camStream){ toast('Start camera first','i'); return; }
+  scanning=!scanning;
+  const btn=document.getElementById('scanBtn');
+  btn.textContent=scanning?'⊙ Auto-Scan: ON':'⊙ Auto-Scan: OFF';
+  btn.classList.toggle('active',scanning);
+  if(scanning){
+    doScan();
+    toast('Auto-scanning… faces will be detected automatically','s');
+  } else {
+    clearTimeout(scanTimer);
+    clearCanvas();
+    document.getElementById('fcVal').textContent='0';
+    toast('Auto-scan stopped','i');
+  }
+}
+
+let lastFPSt=Date.now(), fpsFrames=0;
+async function doScan(){
+  if(!scanning) return;
+  const video=document.getElementById('video');
+  if(video.readyState<2){ scanTimer=setTimeout(doScan,200); return; }
+
+  const t0=Date.now();
+  try{
+    const detections = await faceapi
+      .detectAllFaces(video, new faceapi.TinyFaceDetectorOptions({inputSize:320,scoreThreshold:0.42}))
+      .withFaceLandmarks(true)
+      .withFaceDescriptors();
+
+    document.getElementById('fcVal').textContent=detections.length;
+    drawDetections(video, detections);
+
+    detections.forEach(det=>{
+      const desc=det.descriptor;
+      let matched=null, minDist=999;
+      registeredPeople.forEach(p=>{
+        const d=euclidean(p.descriptor, desc);
+        if(d<minDist){ minDist=d; matched=p; }
+      });
+
+      const THRESHOLD=0.50;
+      if(matched && minDist<THRESHOLD){
+        const conf=Math.round((1-minDist/THRESHOLD)*100);
+        markAttendance(matched.name, conf, matched.color);
+      }
+    });
+
+    // FPS
+    fpsFrames++;
+    if(Date.now()-lastFPSt>=1000){
+      document.getElementById('fpsEl').textContent=`FPS: ${fpsFrames}`;
+      fpsFrames=0; lastFPSt=Date.now();
+    }
+
+  } catch(e){ console.warn(e); }
+
+  const elapsed=Date.now()-t0;
+  scanTimer=setTimeout(doScan, Math.max(0, 800-elapsed));
+}
+
+function drawDetections(video, detections){
+  const canvas=document.getElementById('overlay');
+  const box=video.getBoundingClientRect();
+  canvas.width=box.width; canvas.height=box.height;
+  const ctx=canvas.getContext('2d');
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  const scaleX=box.width/video.videoWidth;
+  const scaleY=box.height/video.videoHeight;
+
+  detections.forEach(det=>{
+    const {x,y,width,height}=det.detection.box;
+    const rx=(canvas.width-(x+width)*scaleX), ry=y*scaleY;
+    const rw=width*scaleX, rh=height*scaleY;
+
+    // match
+    let matched=null, minDist=999;
+    registeredPeople.forEach(p=>{
+      const d=euclidean(p.descriptor,det.descriptor);
+      if(d<minDist){minDist=d;matched=p;}
+    });
+    const THRESHOLD=0.50;
+    const known=matched&&minDist<THRESHOLD;
+    const color=known?matched.color:'#ff5c6c';
+    const label=known?`${matched.name} ${Math.round((1-minDist/THRESHOLD)*100)}%`:'Unknown';
+
+    // draw box
+    ctx.strokeStyle=color; ctx.lineWidth=2;
+    ctx.strokeRect(rx,ry,rw,rh);
+
+    // corners
+    const cs=Math.min(14,rw*0.18);
+    ctx.lineWidth=3; ctx.strokeStyle=color;
+    const corners=[[rx,ry],[rx+rw,ry],[rx,ry+rh],[rx+rw,ry+rh]];
+    corners.forEach(([cx,cy],i)=>{
+      const dx=i%2===0?1:-1, dy=i<2?1:-1;
+      ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(cx+dx*cs,cy); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(cx,cy); ctx.lineTo(cx,cy+dy*cs); ctx.stroke();
+    });
+
+    // label pill
+    ctx.font='bold 11px DM Mono,monospace';
+    const tw=ctx.measureText(label).width+16;
+    const lh=22, lx=rx, ly=ry-lh-2;
+    ctx.fillStyle=color+'dd';
+    roundRect(ctx,lx,ly,tw,lh,5);
+    ctx.fillStyle='#fff'; ctx.font='bold 11px DM Mono,monospace';
+    ctx.fillText(label,lx+8,ly+14);
+  });
+}
+
+function roundRect(ctx,x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y);
+  ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+  ctx.lineTo(x+w,y+h-r); ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  ctx.lineTo(x+r,y+h); ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+  ctx.lineTo(x,y+r); ctx.quadraticCurveTo(x,y,x+r,y);
+  ctx.closePath(); ctx.fill();
+}
+
+function clearCanvas(){
+  const c=document.getElementById('overlay');
+  c.getContext('2d').clearRect(0,0,c.width,c.height);
+}
+
+// ══════════════════════════════════════════════════════════════
+//  ATTENDANCE
+// ══════════════════════════════════════════════════════════════
+const markedToday=new Set(attendanceLog.map(e=>e.name));
+
+function markAttendance(name, confidence, color){
+  if(markedToday.has(name)) return;
+  markedToday.add(name);
+  const entry={name, time:nowTime(), confidence, color};
+  attendanceLog.push(entry);
+  saveLog();
+  renderLog();
+  updateStats();
+  toast(`✓ ${name} marked Present (${confidence}% match)`, 's');
+}
+
+function renderLog(){
+  const list=document.getElementById('logList');
+  if(!attendanceLog.length){
+    list.innerHTML='<div class="log-empty">No attendance recorded yet.<br/>Start camera → Auto-Scan to begin.</div>';
+    return;
+  }
+  list.innerHTML=[...attendanceLog].reverse().map(e=>`
+    <div class="log-entry">
+      <div class="le-av" style="background:${e.color||'var(--accent)'}22;color:${e.color||'var(--accent)'}">${e.name[0].toUpperCase()}</div>
+      <div class="le-info">
+        <div class="le-name">${e.name}</div>
+        <div class="le-time">${e.time} · ${e.confidence}% confidence</div>
+      </div>
+      <div class="le-badge badge-present">✓ Present</div>
+    </div>`).join('');
+}
+
+function updateStats(){
+  const pr=attendanceLog.length;
+  const reg=registeredPeople.length;
+  document.getElementById('sPresent').textContent=pr;
+  document.getElementById('sReg').textContent=reg;
+  document.getElementById('sRate').textContent=reg?Math.round(pr/reg*100)+'%':'0%';
+}
+
+function clearToday(){
+  if(!confirm('Clear today\'s attendance records?')) return;
+  attendanceLog.length=0; markedToday.clear();
+  saveLog(); renderLog(); updateStats();
+  toast('Today\'s attendance cleared','i');
+}
+
+function downloadCSV(){
+  if(!attendanceLog.length){ toast('No attendance to download','i'); return; }
+  const rows=[['Name','Date','Time','Confidence%'],...attendanceLog.map(e=>[e.name,today(),e.time,e.confidence])];
+  const csv=rows.map(r=>r.join(',')).join('\n');
+  const a=document.createElement('a');
+  a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
+  a.download=`attendance_${today()}.csv`;
+  a.click();
+  toast('CSV downloaded!','s');
+}
+
+// ══════════════════════════════════════════════════════════════
+//  REGISTER FACE
+// ══════════════════════════════════════════════════════════════
+async function openRegCam(){
+  if(!modelsReady){ toast('Models still loading…','i'); return; }
+  try{
+    regStream=await navigator.mediaDevices.getUserMedia({video:{width:640,height:480,facingMode:'user'},audio:false});
+    const v=document.getElementById('regVideo');
+    v.srcObject=regStream; v.style.display='block';
+    document.getElementById('snapPh').style.display='none';
+    document.getElementById('snapImg').style.display='none';
+    document.getElementById('captureBtn').disabled=false;
+    document.getElementById('regCamBtn').disabled=true;
+  }catch(e){ toast('Camera access denied','e'); }
+}
+
+async function doCapture(){
+  const v=document.getElementById('regVideo');
+  const c=document.getElementById('regCanvas');
+  c.width=v.videoWidth||640; c.height=v.videoHeight||480;
+  // mirror fix for display
+  const ctx=c.getContext('2d');
+  ctx.translate(c.width,0); ctx.scale(-1,1);
+  ctx.drawImage(v,0,0);
+  ctx.setTransform(1,0,0,1,0,0);
+  snapshotB64=c.toDataURL('image/jpeg',0.92);
+
+  const img=document.getElementById('snapImg');
+  img.src=snapshotB64; img.style.display='block';
+  v.style.display='none';
+  if(regStream){ regStream.getTracks().forEach(t=>t.stop()); regStream=null; }
+  document.getElementById('captureBtn').disabled=true;
+  document.getElementById('regCamBtn').disabled=false;
+  document.getElementById('snapPh').style.display='none';
+  toast('Photo captured! Now click Register.','s');
+}
+
+function doRetake(){
+  snapshotB64=null;
+  document.getElementById('snapImg').style.display='none';
+  document.getElementById('snapPh').style.display='flex';
+  document.getElementById('snapPh').style.flexDirection='column';
+  document.getElementById('snapPh').style.alignItems='center';
+  document.getElementById('regVideo').style.display='none';
+  document.getElementById('captureBtn').disabled=true;
+  document.getElementById('regCamBtn').disabled=false;
+  document.getElementById('regMsg').textContent='';
+  if(regStream){ regStream.getTracks().forEach(t=>t.stop()); regStream=null; }
+}
+
+async function doRegister(){
+  const name=document.getElementById('regName').value.trim();
+  const msg=document.getElementById('regMsg');
+  if(!name){ msg.style.color='var(--red)'; msg.textContent='⚠ Enter a name first.'; return; }
+  if(!snapshotB64){ msg.style.color='var(--red)'; msg.textContent='⚠ Capture a photo first.'; return; }
+  if(!modelsReady){ msg.style.color='var(--red)'; msg.textContent='⚠ AI models not ready yet.'; return; }
+
+  msg.style.color='var(--muted)'; msg.textContent='🔍 Detecting face…';
+
+  try{
+    const img=await faceapi.fetchImage(snapshotB64);
+    const det=await faceapi
+      .detectSingleFace(img, new faceapi.TinyFaceDetectorOptions({inputSize:320,scoreThreshold:0.40}))
+      .withFaceLandmarks(true)
+      .withFaceDescriptor();
+
+    if(!det){
+      msg.style.color='var(--red)';
+      msg.textContent='⚠ No face detected. Try better lighting or move closer.';
+      toast('No face detected in photo','e');
+      return;
+    }
+
+    const color=COLORS[registeredPeople.length % COLORS.length];
+    registeredPeople.push({
+      name, descriptor: det.descriptor,
+      color, addedAt: nowTime(), photo: snapshotB64
+    });
+    save();
+    updateStats();
+    renderPeople();
+    msg.style.color='var(--green)';
+    msg.textContent=`✓ ${name} registered successfully!`;
+    document.getElementById('regName').value='';
+    doRetake();
+    toast(`✓ ${name} registered!`,'s');
+  }catch(e){
+    console.error(e);
+    msg.style.color='var(--red)';
+    msg.textContent='⚠ Error processing face. Try again.';
+    toast('Registration failed','e');
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+//  PEOPLE LIST
+// ══════════════════════════════════════════════════════════════
+function renderPeople(){
+  const list=document.getElementById('peopleList');
+  document.getElementById('peopleCount').textContent=`${registeredPeople.length} people`;
+  if(!registeredPeople.length){
+    list.innerHTML='<div class="log-empty">No one registered yet.<br/>Go to Register Face tab.</div>';
+    return;
+  }
+  list.innerHTML=registeredPeople.map((p,i)=>`
+    <div class="person-card">
+      <div class="p-avatar" style="background:${p.color}22;color:${p.color}">${p.name[0].toUpperCase()}</div>
+      <div class="p-info">
+        <div class="p-name">${p.name}</div>
+        <div class="p-sub">Added ${p.addedAt}</div>
+      </div>
+      <button class="p-del" onclick="deletePerson(${i})" title="Remove">🗑</button>
+    </div>`).join('');
+}
+
+function deletePerson(i){
+  const name=registeredPeople[i].name;
+  if(!confirm(`Remove ${name} from registered list?`)) return;
+  registeredPeople.splice(i,1);
+  save(); renderPeople(); updateStats();
+  toast(`${name} removed`,'i');
+}
+</script>
+</body>
+</html>
